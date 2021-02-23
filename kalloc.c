@@ -13,10 +13,15 @@ void freerange(void *vstart, void *vend);
 extern char end[]; // first address after kernel loaded from ELF file
                    // defined by the kernel linker script in kernel.ld
 
+
+// Try for a FIFO doubly linked list implementation
 struct run {
   struct run *next;
   struct run *prev;
 };
+ 
+//Stores a reference to the current page to be allocated by kalloc()
+struct run *currentPage;
 
 struct {
   struct spinlock lock;
@@ -68,10 +73,18 @@ kfree(char *v)
   // Fill with junk to catch dangling refs.
   memset(v, 1, PGSIZE);
 
+  
+
   if(kmem.use_lock)
     acquire(&kmem.lock);
+  
   r = (struct run*)v;
-  kmem.freelist->prev = r;
+
+  if(kmem.freelist == 0) 
+    currentPage = r;
+  else
+    kmem.freelist->prev = r;
+  
   r->next = kmem.freelist;
   kmem.freelist = r;
   if(kmem.use_lock)
@@ -85,13 +98,20 @@ char*
 kalloc(void)
 {
   struct run *r;
-
   if(kmem.use_lock)
     acquire(&kmem.lock);
-  r = kmem.freelist;
+  r = currentPage;
+  if(currentPage == kmem.freelist){
+    currentPage = 0;
+    kmem.freelist = 0;
+    if(kmem.use_lock)
+      release(&kmem.lock);
+    return (char *)r;
+  }
   if(r){
-    kmem.freelist = r->next;
-    kmem.freelist->prev = 0;
+    currentPage = (r->prev);
+    currentPage->next = 0;
+    r->prev = 0;
   }
   if(kmem.use_lock)
     release(&kmem.lock);
